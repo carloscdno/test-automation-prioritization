@@ -1,4 +1,4 @@
-# Test Automation ROI Evaluation
+# Test Automation ROI Evaluation Flow
 
 The purpose of this evaluation is to determine whether a test case should be classified as:
 
@@ -18,7 +18,60 @@ The evaluation consists of four phases:
 
 # 1. Pre-Filters
 
-## 1.1 Coverage Level
+The purpose of the pre-filter phase is to stop the evaluation early when there is not enough value or feasibility to justify ROI scoring.
+
+## 1.1 Regression Value
+
+Ask:
+
+**Would this test provide value by detecting a future regression?**
+
+Options:
+
+- Yes
+- No
+
+### If Yes
+
+Continue to **1.2 Coverage Level**.
+
+### If No
+
+Ask:
+
+**Have there been previous bugs or incidents in this feature or functional area?**
+
+#### If Yes
+
+Stop the evaluation.
+
+**Verdict: `MANUAL`**
+
+Reason:
+
+The test does not currently provide clear recurring regression-detection value, but previous bugs or incidents in this area justify continued manual validation.
+
+Recommendation:
+
+Execute the test manually and reevaluate it in the future if repeated manual execution shows that automation could reliably detect recurring regressions.
+
+#### If No
+
+Stop the evaluation.
+
+**Verdict: `DEFERRED`**
+
+Reason:
+
+The test does not currently provide recurring regression-detection value and there is no previous defect history indicating a strong need for continued automation investment.
+
+Recommendation:
+
+Do not prioritize automation unless the test's frequency, risk, defect history, business relevance, or regression value changes.
+
+---
+
+## 1.2 Coverage Level
 
 Ask:
 
@@ -26,15 +79,14 @@ Ask:
 
 Options:
 
-- `FEATURE`
-- `APP`
-- `UNKNOWN`
+- `FEATURE` — Specific functional behavior
+- `APP` — Application-wide, cross-cutting, global, or large-scale responsibility
 
-### If the answer is `FEATURE`
+### If `FEATURE`
 
-Continue to **1.2 Regression Protection**.
+Continue to **1.3 Automation Suitability**.
 
-### If the answer is `APP`
+### If `APP`
 
 Stop the evaluation.
 
@@ -42,79 +94,23 @@ Stop the evaluation.
 
 Reason:
 
-The test covers an application-wide or cross-cutting responsibility and should be handled by a global test suite rather than being automated as part of a specific feature.
-
-### If the answer is `UNKNOWN`
-
-Use the following scope classification rules.
-
----
-
-## 1.1.1 Scope Classification — Feature vs. App
-
-Ask:
-
-**Does this test validate an explicit and specific Acceptance Criterion defined for this User Story or Feature?**
-
-Options:
-
-- Yes
-- No
-
-### If Yes
-
-Classify the test as:
-
-`FEATURE`
-
-Continue to **1.2 Regression Protection**.
-
-### If No
-
-Ask:
-
-**Does this test validate an application-wide quality standard, large-scale test, global scanner, or cross-cutting behavior?**
+The test represents an application-wide or cross-cutting responsibility and should be evaluated as part of a global test suite rather than as automation tied to a specific feature.
 
 Examples may include:
 
 - Application-wide accessibility checks
 - Global security scans
-- Large-scale performance/load testing
+- Large-scale performance or load testing
 - Global compatibility checks
-- Application-wide quality policies
-
-Options:
-
-- Yes
-- No
-
-### If Yes
-
-Classify the test as:
-
-`APP`
-
-Stop the evaluation.
-
-**Verdict: `DEFERRED-APP`**
-
-### If No
-
-Treat the test as:
-
-`FEATURE`
-
-for the purpose of this evaluation.
-
-Continue to **1.2 Regression Protection**.
+- Cross-cutting application quality policies
 
 ---
 
-## 1.2 Regression Protection
+## 1.3 Automation Suitability
 
 Ask:
 
-**Does this test protect against a potential future regression?**
+**Does this test require visual inspection, subjective interpretation, or human judgment that cannot be evaluated reliably through automation?**
 
 Options:
 
@@ -123,17 +119,30 @@ Options:
 
 ### If Yes
 
-Continue to:
+Stop the evaluation.
 
-**Phase 2 — Factor Scoring**
+**Verdict: `MANUAL`**
+
+Reason:
+
+Automation cannot reliably replace the human judgment required by this validation.
+
+Examples may include:
+
+- Subjective visual quality
+- Whether an animation feels natural
+- Whether content looks visually balanced
+- Exploratory testing
+- Human interpretation of usability
+- Subjective audio or visual assessment
 
 ### If No
 
-Evaluate previous defect history.
+Continue to **1.4 Previous Bug History**.
 
 ---
 
-## 1.3 Previous Bug History
+## 1.4 Previous Bug History
 
 Ask:
 
@@ -144,33 +153,13 @@ Options:
 - Yes
 - No
 
-### If Regression Protection = No and Previous Bugs = Yes
+Store the answer for later use during the final verdict calculation.
 
-Stop the evaluation.
+This answer does not stop the evaluation at this point.
 
-**Verdict: `MANUAL`**
+Continue to:
 
-Reason:
-
-The test does not currently demonstrate enough recurring regression-protection value to justify automation, but previous defects in this area justify continued manual validation.
-
-Recommendation:
-
-Execute the test manually.
-
-If future manual executions demonstrate that the test could reliably prevent recurring regressions, perform a new automation evaluation.
-
-### If Regression Protection = No and Previous Bugs = No
-
-Stop the evaluation.
-
-**Verdict: `DEFERRED`**
-
-Reason:
-
-There is currently insufficient evidence of recurring value to justify automating this test.
-
-The test may be reevaluated if its frequency, risk, defect history, or business relevance changes.
+**Phase 2 — Factor Scoring**
 
 ---
 
@@ -198,9 +187,7 @@ Values outside this range must be rejected.
 
 Calculate:
 
-```text
-Base ROI = (F × I × S) / (E × D)
-```
+`Base ROI = (F × I × S) / (E × D)`
 
 Where:
 
@@ -214,7 +201,7 @@ Where:
 
 ## 3.2 Reuse Factor
 
-Ask the user:
+Ask:
 
 **How many additional test flows, scenarios, or components could reuse code or infrastructure created by this automation?**
 
@@ -224,23 +211,7 @@ Enter:
 
 Otherwise, enter the number of additional flows, scenarios, or components that could benefit from this automation.
 
-Example:
-
-```text
-Additional reuse opportunities: 0
-```
-
-means that the automation is only useful for the current test.
-
-```text
-Additional reuse opportunities: 3
-```
-
-means that three additional test flows, scenarios, or components could reuse part of the automation.
-
----
-
-## 3.2.1 Definition of `N`
+### Definition of `N`
 
 `N` represents:
 
@@ -248,16 +219,13 @@ means that three additional test flows, scenarios, or components could reuse par
 
 The current test itself is not included in `N`.
 
-Therefore:
+Examples:
 
 - `N = 0` → No additional reuse
 - `N = 1` → One additional reuse opportunity
-- `N = 2` → Two additional reuse opportunities
-- `N = 5` → Five additional reuse opportunities
+- `N = 3` → Three additional reuse opportunities
 
----
-
-## 3.2.2 Validation Rules for `N`
+### Validation Rules for `N`
 
 `N` must:
 
@@ -266,9 +234,7 @@ Therefore:
 
 Negative values are not allowed.
 
-Examples:
-
-Valid:
+Valid examples:
 
 ```text
 0
@@ -277,7 +243,7 @@ Valid:
 10
 ```
 
-Invalid:
+Invalid examples:
 
 ```text
 -1
@@ -286,114 +252,35 @@ Invalid:
 abc
 ```
 
-If the user enters an invalid value, the CLI should reject the input and ask again.
-
-Suggested CLI prompt:
-
-```text
-How many additional flows, scenarios, or components could reuse this automation?
-
-Enter 0 if there are no additional reuse opportunities.
-
-> 
-```
-
 ---
 
 ## 3.3 Reuse-Adjusted ROI
 
 Calculate:
 
-```text
-Adjusted ROI = Base ROI × (1 + 0.2 × N)
-```
+`Adjusted ROI = Base ROI × (1 + 0.2 × N)`
 
 Where:
 
-`N` is the number of additional reuse opportunities.
+- `Base ROI` is the result of the base ROI formula
+- `N` is the number of additional reuse opportunities
 
-### Example 1
-
-Given:
-
-```text
-Base ROI = 2.50
-N = 0
-```
-
-Then:
-
-```text
-Adjusted ROI = 2.50 × (1 + 0.2 × 0)
-Adjusted ROI = 2.50
-```
-
-There is no reuse bonus.
-
-### Example 2
-
-Given:
+Example:
 
 ```text
 Base ROI = 2.50
 N = 2
-```
 
-Then:
-
-```text
 Adjusted ROI = 2.50 × (1 + 0.2 × 2)
 Adjusted ROI = 2.50 × 1.4
 Adjusted ROI = 3.50
 ```
 
-The reuse potential increases the automation value.
-
 ---
 
 # 4. Final Verdict and Exceptions
 
-Before applying the final ROI thresholds, evaluate two special conditions.
-
----
-
-## 4.1 Human Judgment Requirement
-
-Ask:
-
-**Does this test require visual inspection, subjective interpretation, or human judgment that cannot be evaluated reliably through automation?**
-
-Options:
-
-- Yes
-- No
-
-Examples may include:
-
-- Subjective visual quality
-- Natural-looking animation
-- Whether text "looks good"
-- Human interpretation of usability
-- Exploratory behavior
-- Subjective audio or visual assessment
-
-### If Yes
-
-The test should not automatically become an automation candidate, even if its calculated ROI is high.
-
-Default verdict:
-
-**`MANUAL`**
-
-Reason:
-
-Automation cannot reliably replace the human judgment required by this validation.
-
-This rule takes precedence over ROI-based classification.
-
----
-
-## 4.2 Critical Happy Path
+## 4.1 Critical Happy Path
 
 Ask:
 
@@ -421,21 +308,42 @@ If the test is a critical Happy Path, it may be promoted to:
 
 even when its ROI would normally result in `MANUAL` or `DEFERRED`.
 
-However, this exception does not override the Human Judgment rule.
+The Human Judgment restriction has already been handled during the pre-filter phase, so only tests that are technically suitable for automation reach this step.
 
 ---
+
+
+## 4.2 Automation Thresholds
+
+The ROI thresholds used by this tool are predefined heuristic decision thresholds used to classify automation value consistently.
+
+The current thresholds are:
+
+- `Adjusted ROI > 3.0` → Strong automation candidate
+- `1.5 <= Adjusted ROI <= 3.0` → Conditional automation candidate
+- `0.5 <= Adjusted ROI < 1.5` → Manual execution preferred
+- `Adjusted ROI < 0.5` → Automation should be deferred
+
+The main automation threshold is:
+
+`Adjusted ROI > 3.0`
+
+A result above this value is considered sufficient, by default, to classify the test as `CANDIDATE`.
+
+Results between `1.5` and `3.0` require additional context, such as previous defect history, before being promoted to `CANDIDATE`.
+
+> **Important:** These thresholds are heuristic rules defined for this tool. They are not universal industry standards. They are intended to provide consistency in automation prioritization and may be recalibrated in the future using historical defect data, automation effort, maintenance cost, execution frequency, or business priorities.
+
 
 # 5. ROI Classification Rules
 
 After calculating the Adjusted ROI, apply the following rules.
 
-## Rule 1 — ROI Above 3.0
+## Rule 1 — Adjusted ROI Above 3.0
 
 If:
 
-```text
-Adjusted ROI > 3.0
-```
+`Adjusted ROI > 3.0`
 
 Verdict:
 
@@ -443,37 +351,39 @@ Verdict:
 
 ---
 
-## Rule 2 — ROI Between 1.5 and 3.0
+## Rule 2 — Adjusted ROI Between 1.5 and 3.0
 
 If:
 
-```text
-1.5 <= Adjusted ROI <= 3.0
-```
+`1.5 <= Adjusted ROI <= 3.0`
 
-and previous bugs exist:
+and:
+
+Previous bugs exist
+
+Then:
 
 **`CANDIDATE`**
 
 If:
 
-```text
-1.5 <= Adjusted ROI <= 3.0
-```
+`1.5 <= Adjusted ROI <= 3.0`
 
-and no previous bugs exist:
+and:
+
+No previous bugs exist
+
+Then:
 
 **`MANUAL`**
 
 ---
 
-## Rule 3 — ROI Between 0.5 and 1.5
+## Rule 3 — Adjusted ROI Between 0.5 and 1.5
 
 If:
 
-```text
-0.5 <= Adjusted ROI < 1.5
-```
+`0.5 <= Adjusted ROI < 1.5`
 
 Verdict:
 
@@ -481,13 +391,11 @@ Verdict:
 
 ---
 
-## Rule 4 — ROI Below 0.5
+## Rule 4 — Adjusted ROI Below 0.5
 
 If:
 
-```text
-Adjusted ROI < 0.5
-```
+`Adjusted ROI < 0.5`
 
 Verdict:
 
@@ -501,17 +409,9 @@ After determining the initial ROI-based verdict:
 
 If:
 
-```text
-Critical Happy Path = Yes
-```
+`Critical Happy Path = Yes`
 
-and:
-
-```text
-Human Judgment Required = No
-```
-
-Promote the verdict to:
+promote the verdict to:
 
 **`CANDIDATE`**
 
@@ -528,85 +428,66 @@ The final explanation should explicitly mention that the test was promoted becau
 
 To avoid conflicting decisions, rules should be evaluated in the following order:
 
-1. Application-Level Scope
-2. Regression Protection
-3. Previous Bug History during Pre-Filtering
-4. Human Judgment Requirement
-5. Factor Scoring
-6. ROI Calculation
-7. ROI Classification
-8. Critical Happy Path Exception
-9. Final Verdict
+1. Regression Value
+2. Previous Bug History when Regression Value is `No`
+3. Coverage Level
+4. Automation Suitability / Human Judgment
+5. Previous Bug History when Regression Value is `Yes`
+6. Factor Scoring
+7. Base ROI Calculation
+8. Reuse Adjustment
+9. ROI Classification
+10. Critical Happy Path Exception
+11. Final Verdict
 
 ---
 
-# 8. Decision Summary
-
-The overall decision flow can be summarized as follows:
+# 8. Pre-Filter Decision Summary
 
 ```text
 START
   |
   v
-Determine Coverage Level
+Would this test provide value
+by detecting a future regression?
   |
-  +--> APP
-  |      |
-  |      +--> DEFERRED-APP
+  +---------------- NO ----------------+
+  |                                    |
+ YES                                   v
+  |                             Previous bugs?
+  |                                /       \
+  |                              YES       NO
+  |                               |         |
+  |                            MANUAL    DEFERRED
+  |                               |         |
+  |                              STOP      STOP
   |
-  +--> FEATURE
+  v
+Coverage Level?
   |
-  +--> UNKNOWN
-         |
-         v
-      Resolve APP vs FEATURE
-         |
-         +--> APP --> DEFERRED-APP
-         |
-         +--> FEATURE
-                  |
-                  v
-       Protects Against Regression?
-                  |
-          +-------+-------+
-          |               |
-         NO              YES
-          |               |
-          v               v
-   Previous Bugs?     Factor Scoring
-          |               |
-      +---+---+           v
-      |       |       Calculate Base ROI
-     YES     NO            |
-      |       |            v
-   MANUAL  DEFERRED    Ask for N
-                          |
-                          v
-                  Calculate Adjusted ROI
-                          |
-                          v
-                 Human Judgment Required?
-                          |
-                    +-----+-----+
-                    |           |
-                   YES          NO
-                    |           |
-                 MANUAL         v
-                         Apply ROI Rules
-                                |
-                                v
-                     Critical Happy Path?
-                                |
-                        +-------+-------+
-                        |               |
-                       YES              NO
-                        |               |
-                 Promote Candidate   Keep Verdict
-                        |               |
-                        +-------+-------+
-                                |
-                                v
-                           FINAL RESULT
+  +--------- APP ----------> DEFERRED-APP
+  |                              |
+FEATURE                          STOP
+  |
+  v
+Requires human judgment
+that cannot be reliably automated?
+  |
+  +--------- YES ----------> MANUAL
+  |                           |
+  NO                         STOP
+  |
+  v
+Previous bugs?
+  |
+ YES / NO
+  |
+  v
+Store answer
+  |
+  v
+PHASE 2
+Factor Scoring
 ```
 
 ---
@@ -621,17 +502,23 @@ This does not necessarily mean it should be automated immediately.
 
 It means the test should be considered for inclusion in the automation backlog and prioritized against other candidates.
 
+---
+
 ## `MANUAL`
 
 The test still provides testing value, but manual execution is currently more appropriate.
 
 The test may be reevaluated in the future.
 
+---
+
 ## `DEFERRED-APP`
 
 The test represents an application-wide or cross-cutting responsibility.
 
 It should be evaluated as part of a global testing strategy or global automation suite rather than as automation tied to a specific feature.
+
+---
 
 ## `DEFERRED`
 
@@ -642,8 +529,6 @@ The test should not be prioritized unless its frequency, risk, defect history, b
 ---
 
 # 10. Evaluation Output
-
-The CLI should not return only the verdict.
 
 Whenever the evaluation reaches the ROI calculation phase, the final result should ideally include:
 
@@ -658,7 +543,6 @@ Whenever the evaluation reaches the ROI calculation phase, the final result shou
 - Adjusted ROI
 - Previous Bug History
 - Critical Happy Path
-- Human Judgment Requirement
 - Final Verdict
 - Verdict Reason
 - Recommendation
@@ -686,7 +570,6 @@ Adjusted ROI:            9.33
 
 Previous Bugs:           Yes
 Critical Happy Path:     No
-Human Judgment Required: No
 
 Verdict: CANDIDATE
 
