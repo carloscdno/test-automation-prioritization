@@ -2,340 +2,332 @@ from textwrap import fill
 
 import questionary
 
-from test_automation_prioritization.evaluator import (
-    calculate_adjusted_roi,
-    calculate_base_roi,
-)
-from test_automation_prioritization.rules import (
-    evaluate_automation_suitability,
-    evaluate_coverage,
-    evaluate_final_verdict,
-    evaluate_regression,
-)
-from test_automation_prioritization.validators import validate_non_negative_integer
+from test_automation_prioritization.models import TestCaseAssessment
+from test_automation_prioritization.rules import evaluate
+
+LINE_WIDTH = 100
+
+FIELD_LABELS = {
+    "oracle": "Automatic verification of expected results",
+    "repeatability": "Ability to repeat the test reliably",
+    "access": "Required tools, environments, and system access",
+    "impact": "Business impact",
+    "likelihood": "Likelihood of failure",
+    "cadence": "Execution frequency",
+    "distinct_coverage": "Existing automated test coverage",
+    "implementation_effort": "Implementation effort",
+    "maintenance": "Expected maintenance effort",
+}
+
+VALUE_LABELS = {
+    "NO": "Not currently possible",
+    "PARTIALLY": "Partially available or reliable",
+    "UNKNOWN": "Not enough information",
+    "LOW": "Low",
+    "MEDIUM": "Medium",
+    "HIGH": "High",
+    "ORDINARY": "Ordinary",
+    "ELEVATED": "Elevated",
+    "FREQUENT": "Frequent",
+    "PER_RELEASE": "Per release",
+    "OCCASIONAL": "Occasional",
+    "ANNUAL": "Annual",
+}
+
+FACTOR_LABELS = {
+    "No reliable automated test oracle": (
+        "The expected result cannot be verified reliably through automation"
+    ),
+    "Test conditions are not repeatable": (
+        "The test cannot currently be repeated under controlled conditions"
+    ),
+    "Existing automated coverage": "An equivalent automated test already exists",
+    "Frequent execution": "The test needs to run frequently",
+    "Significant testing value": "The test provides significant testing value",
+    "Manageable implementation and maintenance": (
+        "The effort to build and maintain this test appears manageable"
+    ),
+    "Low impact": "A failure would have limited business impact",
+    "Annual execution": "The test only needs to run about once a year",
+}
+
+# Used to avoid printing the same technical obstacle twice.
+FACTOR_FIELDS = {
+    "No reliable automated test oracle": "oracle",
+    "Test conditions are not repeatable": "repeatability",
+}
 
 
-def show_header(title):
-    questionary.print(
-        "=" * 136,
-        style="bold fg:darkblue",
-    )
-    questionary.print(
-        title,
-        style="bold fg:yellow",
-    )
-    questionary.print(
-        "=" * 136,
-        style="bold fg:darkblue",
-    )
+def show_header(title: str) -> None:
+    questionary.print("=" * LINE_WIDTH, style="bold fg:darkblue")
+    questionary.print(title, style="bold fg:yellow")
+    questionary.print("=" * LINE_WIDTH, style="bold fg:darkblue")
 
-def show_intro():
-    show_header("TEST AUTOMATION EVALUATION")
 
+def ask(question):
+    """Stop the entire evaluation if the user cancels any question."""
+    answer = question.ask()
+    if answer is None:
+        questionary.print("\nEvaluation cancelled by user.", style="fg:yellow")
+        raise SystemExit(0)
+    return answer
+
+
+def show_intro() -> None:
+    show_header("TEST AUTOMATION PRIORITIZATION")
     print(
-        "This tool will help you determine if a test case "
-        "is a good candidate to be automated."
-    )
-    print(
-        "It uses predefined heuristic ROI thresholds "
-        "to support automation prioritization."
-    )
-    print()
-
-    print(
-        """The final verdict could be one of the following options:
-    - CANDIDATE: meaning 'Candidate for automation' and not necessarily 'must be automated'
-    - MANUAL: in this case, manual execution is more appropriate
-    - DEFERRED-APP: if you are evaluating a non-functional or application-wide responsibility
-    - DEFERRED: automation would not provide value"""
-    )
-
-    print()
-    questionary.press_any_key_to_continue().ask()
-    print()
-
-
-def show_prefilter_results(decision):
-    show_header("AUTOMATION VERDICT")
-
-    print(f"Verdict: {decision[0]}")
-    print()
-
-    print("Reason:")
-    print(fill(decision[1], width=80))
-    print()
-
-    print("Recommendation:")
-    print(fill(decision[2], width=80))
-
-
-def show_final_results(
-    coverage,
-    frequency,
-    impact,
-    stability,
-    effort,
-    dependencies,
-    base_roi,
-    reuse,
-    adjusted_roi,
-    previous_bugs,
-    critical_happy_path,
-    decision,
-):
-    show_header("AUTOMATION VERDICT")
-
-    print(f"Coverage Level: {coverage}")
-    print()
-
-    print("Factor Scores")
-    print("-------------")
-    print(f"Execution Frequency (F):   {frequency}")
-    print(f"Business Impact (I):       {impact}")
-    print(f"Flow Stability (S):        {stability}")
-    print(f"Automation Effort (E):     {effort}")
-    print(f"External Dependencies (D): {dependencies}")
-    print()
-
-    print(f"Base ROI:                   {base_roi:.2f}")
-    print(f"Additional Reuse (N):       {reuse}")
-    print(f"Adjusted ROI:               {adjusted_roi:.2f}")
-    print()
-
-    print(
-        f"Previous Bug History:       "
-        f"{'Yes' if previous_bugs else 'No'}"
+        "Evaluate whether a functional UI, API, or integration test "
+        "is a good candidate for automation."
     )
     print(
-        f"Critical Happy Path:        "
-        f"{'Yes' if critical_happy_path else 'No'}"
+        "This tool considers technical feasibility, testing value, "
+        "and automation effort."
     )
-    print()
-
-    print(f"Final Verdict: {decision[0]}")
-    print()
-
-    print("Reason:")
-    print(fill(decision[1], width=80))
-    print()
-
-    print("Recommendation:")
-    print(fill(decision[2], width=80))
+    print("\nPossible recommendations:")
+    print("  HIGH_PRIORITY       A strong candidate to prioritize for automation.")
+    print("  CONSIDER            A viable candidate with trade-offs to review.")
+    print("  KEEP_MANUAL         Manual testing is more appropriate for now.")
+    print("  NEEDS_INVESTIGATION More information or technical checks are needed.")
+    print("  ALREADY_COVERED     Equivalent automated coverage already exists.")
+    print("\nThese are recommendations, not mandatory decisions.\n")
+    print("\nLet's get to it!\n")
+    ask(questionary.press_any_key_to_continue())
 
 
-def ask_regression():
-    return questionary.confirm(
-        "Would this test provide value by detecting a future regression?"
-    ).ask()
+def select_answer(message: str, options):
+    choices = [
+        questionary.Choice(title=label, value=value)
+        for label, value in options
+    ]
+    return ask(questionary.select(message, choices=choices))
 
 
-def ask_previous_bugs():
-    return questionary.confirm(
-        "Have there been previous bugs or incidents "
-        "in this feature or functional area?"
-    ).ask()
-
-
-def ask_coverage():
-    return questionary.select(
-        "What is the coverage level of this test case?",
-        choices=[
-            questionary.Choice(
-                title="Feature - Specific functional behavior",
-                value="FEATURE",
-            ),
-            questionary.Choice(
-                title="Application-wide - Cross-cutting or global responsibility",
-                value="APP",
-            ),
+def ask_feasibility(message: str):
+    return select_answer(
+        message,
+        [
+            ("Yes - It can be done reliably", "YES"),
+            ("Partially - Some limitations exist", "PARTIALLY"),
+            ("No - Not currently possible", "NO"),
+            ("I'm not sure", "UNKNOWN"),
         ],
-    ).ask()
+    )
 
 
-def ask_automation_suitability():
-    return questionary.confirm(
-"""Does this test require visual inspection, subjective interpretation, 
-or human judgment that cannot be evaluated reliably through automation?"""
-    ).ask()
-
-
-def ask_frequency():
-    return questionary.select(
-        "Select Frequency",
-        choices=[
-            questionary.Choice("1 - Yearly", value=1),
-            questionary.Choice("2 - Per Release", value=2),
-            questionary.Choice("3 - Per Sprint", value=3),
-            questionary.Choice("4 - Daily", value=4),
-            questionary.Choice("5 - PR/Commit", value=5),
+def ask_test_type():
+    return select_answer(
+        "What type of functional test are you evaluating?",
+        [
+            ("UI - User interface", "UI"),
+            ("API - Application programming interface", "API"),
+            ("Integration - Communication between systems", "INTEGRATION"),
         ],
-    ).ask()
+    )
 
 
 def ask_impact():
-    return questionary.select(
-        "Select Impact",
-        choices=[
-            questionary.Choice("1 - Cosmetic", value=1),
-            questionary.Choice("2 - Minor", value=2),
-            questionary.Choice("3 - UX Degradation", value=3),
-            questionary.Choice("4 - Feature Blocking", value=4),
-            questionary.Choice("5 - Core Business/Revenue", value=5),
+    return select_answer(
+        "How serious would a failure in this functionality be?",
+        [
+            ("High - Critical operations or business impact", "HIGH"),
+            ("Medium - Important functionality is affected", "MEDIUM"),
+            ("Low - Minor inconvenience or limited impact", "LOW"),
+            ("I'm not sure", "UNKNOWN"),
         ],
-    ).ask()
+    )
 
 
-def ask_stability():
-    return questionary.select(
-        "Select Stability",
-        choices=[
-            questionary.Choice("1 - Highly Volatile", value=1),
-            questionary.Choice("2 - Unstable", value=2),
-            questionary.Choice("3 - Moderate", value=3),
-            questionary.Choice("4 - Stable", value=4),
-            questionary.Choice(
-                "5 - Very Stable/No Expected Changes",
-                value=5,
+def ask_likelihood():
+    return select_answer(
+        "What is the current likelihood of failure?",
+        [
+            (
+                "Elevated - Recent defects, changes, or known instability",
+                "ELEVATED",
             ),
-        ],
-    ).ask()
-
-
-def ask_effort():
-    return questionary.select(
-        "Select Effort",
-        choices=[
-            questionary.Choice("1 - Trivial", value=1),
-            questionary.Choice("2 - Hours", value=2),
-            questionary.Choice("3 - One or two days", value=3),
-            questionary.Choice("4 - Several days", value=4),
-            questionary.Choice("5 - One week or more", value=5),
-        ],
-    ).ask()
-
-
-def ask_dependencies():
-    return questionary.select(
-        "Select Dependencies",
-        choices=[
-            questionary.Choice("1 - None", value=1),
-            questionary.Choice(
-                "2 - One or two dependencies",
-                value=2,
+            (
+                "Ordinary - No evidence of increased failure risk",
+                "ORDINARY",
             ),
-            questionary.Choice(
-                "3 - Three or four dependencies",
-                value=3,
-            ),
-            questionary.Choice(
-                "4 - Over five dependencies",
-                value=4,
-            ),
-            questionary.Choice(
-                "5 - Complex integrations",
-                value=5,
+            (
+                "Unknown - Not enough information to assess",
+                "UNKNOWN",
             ),
         ],
-    ).ask()
+    )
 
 
-def ask_reuse_factor():
-    reuse = questionary.text(
-        "How many additional flows, scenarios, or components "
-        "could reuse this automation?\n"
-        "Enter 0 if there are no additional reuse opportunities.",
-        validate=validate_non_negative_integer,
-    ).ask()
+def ask_cadence():
+    return select_answer(
+        "How often would this test need to be executed?",
+        [
+            ("Frequently - Daily, per commit, or similar", "FREQUENT"),
+            ("Before each release", "PER_RELEASE"),
+            ("Occasionally - Several times a year", "OCCASIONAL"),
+            ("Annually - About once a year", "ANNUAL"),
+            ("I'm not sure", "UNKNOWN"),
+        ],
+    )
 
-    return int(reuse)
+
+def ask_existing_coverage():
+    return select_answer(
+        "Would this test check behavior not already covered by "
+        "an equivalent automated test?",
+        [
+            ("Yes - It would add new automated coverage", "YES"),
+            ("No - Equivalent automated coverage already exists", "NO"),
+            ("I'm not sure", "UNKNOWN"),
+        ],
+    )
 
 
-def ask_critical_happy_path():
-    return questionary.confirm(
-        "Does this test represent a critical business Happy Path?"
-    ).ask()
+def ask_effort(message: str):
+    return select_answer(
+        message,
+        [
+            ("Low - Relatively straightforward", "LOW"),
+            ("Medium - Moderate work or complexity", "MEDIUM"),
+            ("High - Significant work or complexity", "HIGH"),
+            ("I'm not sure", "UNKNOWN"),
+        ],
+    )
 
-def main():
-    show_intro()
-    
-    show_header("1. PRE-FILTERS")
-    regression_value = ask_regression()
-    
-    if not regression_value:
-        previous_bugs = ask_previous_bugs()
-        
-        decision = evaluate_regression(
-            regression_value, 
-            previous_bugs
-            )
-        
-        show_prefilter_results(decision)
-        return
-    
-    coverage = ask_coverage()
-    decision = evaluate_coverage(coverage)
-    
-    if decision:
-        show_prefilter_results(decision)
-        return
-    
-    automation_suitability = ask_automation_suitability()
-    decision = evaluate_automation_suitability(automation_suitability)
-    
-    if decision:
-        show_prefilter_results(decision)
-        return
-    
-    previous_bugs = ask_previous_bugs()
-        
-    show_header("2. FACTOR SCORING")
-    frequency = ask_frequency()
+
+def collect_assessment() -> TestCaseAssessment:
+    show_header("1. ABOUT YOUR TEST")
+    test_type = ask_test_type()
+
+    show_header("2. CAN THIS TEST BE AUTOMATED?")
+    oracle = ask_feasibility(
+        "Can the expected result be checked reliably through automation?"
+    )
+    repeatability = ask_feasibility(
+        "Can this test run repeatedly under controlled conditions?"
+    )
+    access = ask_feasibility(
+        "Are the necessary tools, environments, and system access available?"
+    )
+
+    show_header("3. HOW VALUABLE IS THIS TEST?")
     impact = ask_impact()
-    stability = ask_stability()
-    effort = ask_effort()
-    dependencies = ask_dependencies()
-    
-    show_header("3. REUSE FACTOR")
-    reuse = ask_reuse_factor()
-    
-    show_header("4. CALCULATION & FINAL VERDICT")
+    likelihood = ask_likelihood()
+    cadence = ask_cadence()
+    distinct_coverage = ask_existing_coverage()
 
-    critical_happy_path = ask_critical_happy_path()
-
-    base_roi = calculate_base_roi(
-        frequency,
-        impact,
-        stability,
-        effort,
-        dependencies,
+    show_header("4. AUTOMATION EFFORT")
+    implementation_effort = ask_effort(
+        "How difficult would it be to build this automated test?"
+    )
+    maintenance = ask_effort(
+        "How much ongoing maintenance would this automated test require?"
     )
 
-    adjusted_roi = calculate_adjusted_roi(
-        base_roi,
-        reuse,
-    )
-
-    decision = evaluate_final_verdict(
-        adjusted_roi,
-        previous_bugs,
-        critical_happy_path,
-    )
-
-    show_final_results(
-        coverage=coverage,
-        frequency=frequency,
+    return TestCaseAssessment(
+        test_type=test_type,
+        oracle=oracle,
+        repeatability=repeatability,
+        access=access,
         impact=impact,
-        stability=stability,
-        effort=effort,
-        dependencies=dependencies,
-        base_roi=base_roi,
-        reuse=reuse,
-        adjusted_roi=adjusted_roi,
-        previous_bugs=previous_bugs,
-        critical_happy_path=critical_happy_path,
-        decision=decision,
+        likelihood=likelihood,
+        cadence=cadence,
+        distinct_coverage=distinct_coverage,
+        implementation_effort=implementation_effort,
+        maintenance=maintenance,
     )
-    
-      
+
+
+def format_limitation(limitation: str) -> str:
+    field, separator, value = limitation.partition(": ")
+    if not separator:
+        return FIELD_LABELS.get(limitation, limitation)
+    label = FIELD_LABELS.get(field, field.replace("_", " ").capitalize())
+    friendly_value = VALUE_LABELS.get(value, value)
+    return f"{label}: {friendly_value}"
+
+
+def format_factor(factor: str) -> str:
+    if factor in FACTOR_LABELS:
+        return FACTOR_LABELS[factor]
+    if factor in FIELD_LABELS:
+        return FIELD_LABELS[factor]
+
+    prefix, separator, value = factor.partition(": ")
+    if separator and prefix in ("Cadence", "Impact", "Implementation effort", "Maintenance"):
+        return f"{prefix}: {VALUE_LABELS.get(value, value)}"
+    if separator and prefix in ("Unknown fields", "Decision-critical fields"):
+        names = [name.strip() for name in value.split(",")]
+        translated = ", ".join(FIELD_LABELS.get(name, name) for name in names)
+        label = "Missing information" if prefix == "Unknown fields" else "Information that could change the decision"
+        return f"{label}: {translated}"
+    if separator and prefix == "Possible outcomes":
+        return f"Possible recommendations: {value.replace('_', ' ').title()}"
+    if separator and prefix == "Stable recommendation":
+        return f"Recommendation is unchanged: {value.replace('_', ' ').title()}"
+    return factor
+
+
+def covered_fields_from_factors(factors: tuple[str, ...]) -> set[str]:
+    covered = set()
+    for factor in factors:
+        if factor in FACTOR_FIELDS:
+            covered.add(FACTOR_FIELDS[factor])
+        elif factor in FIELD_LABELS:
+            covered.add(factor)
+        else:
+            prefix, separator, value = factor.partition(": ")
+            if separator and prefix in ("Unknown fields", "Decision-critical fields"):
+                covered.update(part.strip() for part in value.split(","))
+    return covered
+
+
+def show_bullets(items) -> None:
+    for item in items:
+        print(fill(item, width=LINE_WIDTH, initial_indent="  - ", subsequent_indent="    "))
+
+
+def show_result(result) -> None:
+    print()
+    show_header("AUTOMATION RECOMMENDATION")
+    questionary.print(f"Verdict: {result.verdict}", style="bold fg:yellow")
+    print(f"Test Type: {result.test_type}\n")
+
+    print("Why this recommendation?")
+    print(fill(result.reason, width=LINE_WIDTH))
+    print()
+
+    if result.supporting_factors:
+        print("Key Factors:")
+        show_bullets(format_factor(item) for item in result.supporting_factors)
+        print()
+
+    print("Recommended Next Step:")
+    print(fill(result.next_step, width=LINE_WIDTH))
+    print()
+
+    covered = covered_fields_from_factors(result.supporting_factors)
+    extra_limitations = [
+        item
+        for item in result.limitations
+        if item.partition(": ")[0] not in covered
+    ]
+    if extra_limitations:
+        print("Additional Limitations / Missing Information:")
+        show_bullets(format_limitation(item) for item in extra_limitations)
+        print()
+
+    print(
+        "This recommendation supports QA decision-making "
+        "and does not replace engineering judgment."
+    )
+
+
+def main() -> None:
+    show_intro()
+    assessment = collect_assessment()
+    result = evaluate(assessment)
+    show_result(result)
+
+
 if __name__ == "__main__":
     main()
