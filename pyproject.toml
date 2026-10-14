@@ -11,6 +11,14 @@ dependencies = [
     "questionary>=2.1.1",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [project.scripts]
 test-automation-prioritization = "test_automation_prioritization.cli:main"
 
