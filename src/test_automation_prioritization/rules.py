@@ -1,197 +1,341 @@
-def evaluate_regression(regression_value, previous_bugs):
-    """
-    Evaluates whether the test provides regression-detection value.
+from dataclasses import fields, replace
+from itertools import product
 
-    Returns:
-        None if the evaluation should continue.
-        A decision tuple (verdict, reason, recommendation) if it should stop.
-    """
-    if regression_value:
-        return None
+from test_automation_prioritization.models import (
+    EvaluationResult,
+    TestCaseAssessment,
+)
 
-    if previous_bugs:
-        return (
-            "MANUAL",
-            (
-                "The test does not currently provide clear recurring "
-                "regression-detection value, but previous bugs or incidents "
-                "in this area justify continued manual validation."
-            ),
-            (
-                "Execute the test manually and reevaluate it in the future "
-                "if repeated manual execution shows that automation could "
-                "reliably detect recurring regressions."
-            ),
-        )
+# Allowed values for decision-related unknown inputs.
+POSSIBLE_VALUES = {
+    "impact": ("LOW", "MEDIUM", "HIGH"),
+    "likelihood": ("ORDINARY", "ELEVATED"),
+    "cadence": ("ANNUAL", "OCCASIONAL", "PER_RELEASE", "FREQUENT"),
+    "implementation_effort": ("LOW", "MEDIUM", "HIGH"),
+    "maintenance": ("LOW", "MEDIUM", "HIGH"),
+}
 
-    return (
-        "DEFERRED",
-        (
-            "The test does not currently provide recurring regression-detection "
-            "value and there is no previous defect history indicating a strong "
-            "need for continued automation investment."
-        ),
-        (
-            "Do not prioritize automation unless the test's frequency, risk, "
-            "defect history, business relevance, or regression value changes."
-        ),
+FEASIBILITY_FIELDS = ("oracle", "repeatability", "access")
+
+
+def make_result(
+    assessment: TestCaseAssessment,
+    verdict: str,
+    rule: str,
+    reason: str,
+    next_step: str,
+    supporting_factors: tuple[str, ...] = (),
+    limitations: tuple[str, ...] = (),
+) -> EvaluationResult:
+    """Build a consistent evaluation result."""
+    return EvaluationResult(
+        test_type=assessment.test_type,
+        verdict=verdict,
+        triggered_rule=rule,
+        reason=reason,
+        supporting_factors=supporting_factors,
+        next_step=next_step,
+        limitations=limitations,
     )
 
 
-def evaluate_coverage(coverage):
-    """
-    Evaluates whether the test belongs to a feature-specific scope
-    or an application-wide responsibility.
+def collect_limitations(
+    assessment: TestCaseAssessment,
+) -> tuple[str, ...]:
+    """Collect all known blockers and incomplete inputs."""
+    limitations = []
 
-    Returns:
-        None for FEATURE coverage.
-        A decision tuple for APP coverage.
+    for field in fields(assessment):
+        name = field.name
+        value = getattr(assessment, name)
+
+        if value in ("UNKNOWN", "PARTIALLY"):
+            limitations.append(f"{name}: {value}")
+
+        elif name in FEASIBILITY_FIELDS and value == "NO":
+            limitations.append(f"{name}: NO")
+
+    return tuple(limitations)
+
+
+def evaluate_known_assessment(
+    assessment: TestCaseAssessment,
+) -> EvaluationResult:
     """
-    if coverage == "APP":
-        return (
-            "DEFERRED-APP",
-            (
-                "The test represents an application-wide or "
-                "cross-cutting responsibility."
-            ),
-            (
-                "Evaluate this test as part of a global test suite rather "
-                "than as automation tied to a specific feature."
-            ),
+    Apply the ordered rules to an assessment whose
+    decision-relevant qualitative inputs are known.
+
+    The public evaluate() function should be used when
+    UNKNOWN values may be present.
+    """
+    limitations = collect_limitations(assessment)
+
+    # R1 — Existing automated coverage
+    if assessment.distinct_coverage == "NO":
+        return make_result(
+            assessment,
+            "ALREADY_COVERED",
+            "R1",
+            "Equivalent automated coverage already exists.",
+            "Verify that the existing automated test covers "
+            "the same behavior and failure conditions.",
+            ("Existing automated coverage",),
+            limitations,
         )
 
-    return None
+    # R2 — Unreliable automated verification
+    blockers = []
 
+    if assessment.oracle == "NO":
+        blockers.append("No reliable automated test oracle")
 
-def evaluate_automation_suitability(requires_human_judgment):
-    """
-    Evaluates whether the test requires human judgment that cannot
-    be reliably replaced by automation.
+    if assessment.repeatability == "NO":
+        blockers.append("Test conditions are not repeatable")
 
-    Returns:
-        None if automation remains suitable.
-        A MANUAL decision otherwise.
-    """
-    if requires_human_judgment:
-        return (
-            "MANUAL",
-            (
-                "Automation cannot reliably replace the human judgment "
-                "required by this validation."
-            ),
-            (
-                "Keep this test in the appropriate manual test suite "
-                "and reevaluate it if its validation criteria become automatable."
-            ),
+    if blockers:
+        return make_result(
+            assessment,
+            "KEEP_MANUAL",
+            "R2",
+            "The test cannot currently be automated reliably.",
+            "Maintain appropriate manual validation and "
+            "reevaluate after addressing the technical limitations.",
+            tuple(blockers),
+            limitations,
         )
 
-    return None
+    # R3 — Technical prerequisites
+    unresolved = [
+        name
+        for name in FEASIBILITY_FIELDS
+        if getattr(assessment, name) in ("PARTIALLY", "UNKNOWN")
+        or (name == "access" and assessment.access == "NO")
+    ]
 
-def evaluate_final_verdict(
-    adjusted_roi,
-    previous_bugs,
-    critical_happy_path,
+    if unresolved:
+        return make_result(
+            assessment,
+            "NEEDS_INVESTIGATION",
+            "R3",
+            "Technical feasibility has not been established.",
+            "Investigate the unresolved technical prerequisites "
+            "before prioritizing automation.",
+            tuple(unresolved),
+            limitations,
+        )
+
+    # R4 — Unknown automated coverage
+    if assessment.distinct_coverage == "UNKNOWN":
+        return make_result(
+            assessment,
+            "NEEDS_INVESTIGATION",
+            "R4",
+            "Existing automated coverage has not been verified.",
+            "Review the current automation suite to identify "
+            "potentially equivalent tests.",
+            limitations=limitations,
+        )
+
+    # R5 — Low-value annual check
+    if (
+        assessment.impact == "LOW"
+        and assessment.likelihood == "ORDINARY"
+        and assessment.cadence == "ANNUAL"
+    ):
+        return make_result(
+            assessment,
+            "KEEP_MANUAL",
+            "R5",
+            "The test has low business impact, no evidence of "
+            "elevated failure likelihood, and annual execution.",
+            "Keep manual validation when appropriate and "
+            "reevaluate if the test's value or cadence changes.",
+            ("Low impact", "Annual execution"),
+            limitations,
+        )
+
+    # R6 — Strong automation candidate
+    sufficient_value = (
+        assessment.impact == "HIGH"
+        or (
+            assessment.impact == "MEDIUM"
+            and assessment.likelihood == "ELEVATED"
+        )
+    )
+
+    manageable_effort = assessment.implementation_effort in (
+        "LOW",
+        "MEDIUM",
+    )
+
+    manageable_maintenance = assessment.maintenance in (
+        "LOW",
+        "MEDIUM",
+    )
+
+    if (
+        assessment.cadence == "FREQUENT"
+        and sufficient_value
+        and manageable_effort
+        and manageable_maintenance
+    ):
+        return make_result(
+            assessment,
+            "HIGH_PRIORITY",
+            "R6",
+            "The test provides significant recurring value "
+            "and has manageable automation costs.",
+            "Prioritize this candidate for automation planning.",
+            (
+                "Frequent execution",
+                "Significant testing value",
+                "Manageable implementation and maintenance",
+            ),
+            limitations,
+        )
+
+    # R7 — Remaining feasible candidates
+    return make_result(
+        assessment,
+        "CONSIDER",
+        "R7",
+        "The test appears technically feasible, but its value "
+        "or implementation trade-offs do not establish high priority.",
+        "Review its expected benefits, implementation effort, "
+        "and maintenance requirements before scheduling automation.",
+        (
+            f"Cadence: {assessment.cadence}",
+            f"Impact: {assessment.impact}",
+            f"Implementation effort: {assessment.implementation_effort}",
+            f"Maintenance: {assessment.maintenance}",
+        ),
+        limitations,
+    )
+
+
+def get_unknown_fields(
+    assessment: TestCaseAssessment,
+) -> tuple[str, ...]:
+    """Find unknown fields relevant to qualitative prioritization."""
+    return tuple(
+        name
+        for name in POSSIBLE_VALUES
+        if getattr(assessment, name) == "UNKNOWN"
+    )
+
+
+def generate_completions(
+    assessment: TestCaseAssessment,
 ):
+    """Generate every allowed completion of decision-related unknowns."""
+    unknown_fields = get_unknown_fields(assessment)
+
+    if not unknown_fields:
+        yield assessment
+        return
+
+    choices = [POSSIBLE_VALUES[name] for name in unknown_fields]
+
+    for values in product(*choices):
+        replacements = dict(zip(unknown_fields, values))
+
+        yield replace(assessment, **replacements)
+
+
+def evaluate(
+    assessment: TestCaseAssessment,
+) -> EvaluationResult:
     """
-    Determines the final verdict after ROI calculation.
+    Evaluate one test case using the documented decision policy.
 
-    Thresholds:
-        ROI > 3.0:
-            CANDIDATE
-
-        1.5 <= ROI <= 3.0:
-            CANDIDATE if previous bugs exist
-            MANUAL otherwise
-
-        0.5 <= ROI < 1.5:
-            MANUAL
-
-        ROI < 0.5:
-            DEFERRED
-
-    A critical Happy Path promotes the test to CANDIDATE.
+    Unknown qualitative values only block the recommendation
+    when their possible resolutions would change the verdict.
     """
+    initial_result = evaluate_known_assessment(assessment)
 
-    if critical_happy_path:
-        return (
-            "CANDIDATE",
+    # Explicit rules R1-R4 take precedence over uncertainty analysis.
+    if initial_result.triggered_rule in ("R1", "R2", "R3", "R4"):
+        return initial_result
+
+    unknown_fields = get_unknown_fields(assessment)
+
+    if not unknown_fields:
+        return initial_result
+
+    completed_results = [
+        evaluate_known_assessment(completion)
+        for completion in generate_completions(assessment)
+    ]
+
+    possible_verdicts = {result.verdict for result in completed_results}
+
+    # All possible completions produce the same recommendation.
+    if len(possible_verdicts) == 1:
+        verdict = completed_results[0].verdict
+        rule = completed_results[0].triggered_rule
+
+        return make_result(
+            assessment,
+            verdict,
+            rule,
+            "The recommendation remains unchanged across all "
+            "permitted resolutions of the unknown inputs.",
+            "Review the listed unknowns when practical, but "
+            "they do not currently change this recommendation.",
             (
-                "The test represents a critical business Happy Path. "
-                "Critical business flows receive automation priority even "
-                "when their calculated ROI would not normally reach the "
-                "automation threshold."
+                f"Stable recommendation: {verdict}",
+                f"Unknown fields: {', '.join(unknown_fields)}",
             ),
-            (
-                "Add this test to the automation backlog and prioritize it "
-                "according to business risk and available automation capacity."
-            ),
+            collect_limitations(assessment),
         )
 
-    if adjusted_roi > 3.0:
-        return (
-            "CANDIDATE",
-            (
-                "The adjusted ROI is above the automation threshold of 3.0, "
-                "indicating strong recurring value for automation."
-            ),
-            (
-                "Add this test to the automation backlog and prioritize it "
-                "against other automation candidates."
-            ),
-        )
+    # Identify unknowns that can actually alter the verdict.
+    critical_fields = []
 
-    if 1.5 <= adjusted_roi <= 3.0:
-        if previous_bugs:
-            return (
-                "CANDIDATE",
-                (
-                    "The adjusted ROI is within the conditional automation "
-                    "range and previous defects in this area increase the "
-                    "value of automated regression coverage."
-                ),
-                (
-                    "Consider this test an automation candidate and prioritize "
-                    "it according to defect risk and available automation capacity."
-                ),
-            )
+    for name in unknown_fields:
+        other_fields = [
+            field for field in unknown_fields if field != name
+        ]
 
-        return (
-            "MANUAL",
-            (
-                "The adjusted ROI is within the conditional automation range, "
-                "but there is no previous defect history providing additional "
-                "justification for automation."
-            ),
-            (
-                "Continue executing this test manually and reevaluate it if "
-                "its frequency, defect history, reuse potential, or business "
-                "risk increases."
-            ),
-        )
+        other_choices = [
+            POSSIBLE_VALUES[field] for field in other_fields
+        ]
 
-    if 0.5 <= adjusted_roi < 1.5:
-        return (
-            "MANUAL",
-            (
-                "The adjusted ROI indicates that automation currently provides "
-                "limited value compared with its expected implementation and "
-                "maintenance cost."
-            ),
-            (
-                "Keep this test in the appropriate manual test suite and "
-                "reevaluate it if its automation value increases."
-            ),
-        )
+        changes_outcome = False
 
-    return (
-        "DEFERRED",
+        for other_values in product(*other_choices):
+            fixed_values = dict(zip(other_fields, other_values))
+            verdicts = set()
+
+            for value in POSSIBLE_VALUES[name]:
+                completed = replace(
+                    assessment,
+                    **fixed_values,
+                    **{name: value},
+                )
+
+                verdicts.add(
+                    evaluate_known_assessment(completed).verdict
+                )
+
+            if len(verdicts) > 1:
+                changes_outcome = True
+                break
+
+        if changes_outcome:
+            critical_fields.append(name)
+
+    return make_result(
+        assessment,
+        "NEEDS_INVESTIGATION",
+        "R8",
+        "One or more unknown inputs could change the final "
+        "automation recommendation.",
+        "Clarify the decision-critical inputs before "
+        "prioritizing this test for automation.",
         (
-            "The adjusted ROI is below the minimum automation threshold, "
-            "indicating insufficient current value to justify automation."
+            f"Possible outcomes: {', '.join(sorted(possible_verdicts))}",
+            f"Decision-critical fields: {', '.join(critical_fields)}",
         ),
-        (
-            "Do not prioritize automation at this time. Reevaluate the test "
-            "if its execution frequency, business impact, stability, reuse "
-            "potential, or risk changes."
-        ),
+        collect_limitations(assessment),
     )

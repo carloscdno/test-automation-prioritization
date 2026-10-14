@@ -1,9 +1,11 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Literal
 
 TestType = Literal["UI", "API", "INTEGRATION"]
 
-FeasibilityAnswer = Literal["YES", "PARTIALLY", "NO", "UNKNOWN"]
+FeasibilityAnswer = Literal[
+    "YES", "PARTIALLY", "NO", "UNKNOWN"
+]
 
 Impact = Literal["HIGH", "MEDIUM", "LOW", "UNKNOWN"]
 
@@ -30,6 +32,26 @@ Verdict = Literal[
 ]
 
 
+ALLOWED_VALUES = {
+    "test_type": {"UI", "API", "INTEGRATION"},
+    "oracle": {"YES", "PARTIALLY", "NO", "UNKNOWN"},
+    "repeatability": {"YES", "PARTIALLY", "NO", "UNKNOWN"},
+    "access": {"YES", "PARTIALLY", "NO", "UNKNOWN"},
+    "impact": {"HIGH", "MEDIUM", "LOW", "UNKNOWN"},
+    "likelihood": {"ELEVATED", "ORDINARY", "UNKNOWN"},
+    "cadence": {
+        "FREQUENT",
+        "PER_RELEASE",
+        "OCCASIONAL",
+        "ANNUAL",
+        "UNKNOWN",
+    },
+    "distinct_coverage": {"YES", "NO", "UNKNOWN"},
+    "implementation_effort": {"LOW", "MEDIUM", "HIGH", "UNKNOWN"},
+    "maintenance": {"LOW", "MEDIUM", "HIGH", "UNKNOWN"},
+}
+
+
 @dataclass(frozen=True)
 class TestCaseAssessment:
     test_type: TestType
@@ -42,6 +64,17 @@ class TestCaseAssessment:
     distinct_coverage: CoverageAnswer
     implementation_effort: EffortLevel
     maintenance: EffortLevel
+
+    def __post_init__(self):
+        for field in fields(self):
+            value = getattr(self, field.name)
+            allowed = ALLOWED_VALUES[field.name]
+
+            if value not in allowed:
+                raise ValueError(
+                    f"Invalid value '{value}' for '{field.name}'. "
+                    f"Allowed values: {', '.join(sorted(allowed))}"
+                )
 
 
 @dataclass(frozen=True)
