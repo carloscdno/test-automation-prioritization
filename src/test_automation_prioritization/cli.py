@@ -2,17 +2,17 @@ from textwrap import fill
 
 import questionary
 
-from test_automation_roi.evaluator import (
+from test_automation_prioritization.evaluator import (
     calculate_adjusted_roi,
     calculate_base_roi,
 )
-from test_automation_roi.rules import (
+from test_automation_prioritization.rules import (
     evaluate_automation_suitability,
     evaluate_coverage,
     evaluate_final_verdict,
     evaluate_regression,
 )
-from test_automation_roi.validators import validate_non_negative_integer
+from test_automation_prioritization.validators import validate_non_negative_integer
 
 
 def show_header(title):
